@@ -757,7 +757,7 @@ class cgcnn(base_model):
     Directories:
         dir_name: Name for directories (summaries and model parameters).
     """
-    def __init__(self, L, S, F, K, p, M, filter='chebyshev5', brelu='b1relu', pool='mpool1',
+    def __init__(self, L, S, F, K, p, M, filter='chebyshev5', brelu='b1relu', pool='mpool1', use_fc=True,
                 num_epochs=20, learning_rate=0.1, decay_rate=0.95, decay_steps=None, momentum=0.9,
                 regularization=0, dropout=0, batch_size=100, eval_frequency=200,
                 dir_name=''):
@@ -796,14 +796,19 @@ class cgcnn(base_model):
             elif brelu == 'b2relu':
                 print('    biases: M_{0} * F_{0} = {1} * {2} = {3}'.format(
                         i+1, L[i].shape[0], F[i], L[i].shape[0]*F[i]))
-        for i in range(Nfc):
-            name = 'fc{}'.format(i+1)
-            print('  layer {}: {}'.format(Ngconv+i+1, name))
-            print('    representation: M_{} = {}'.format(Ngconv+i+1, M[i]))
-            M_last = M[i-1] if i > 0 else M_0 if Ngconv == 0 else L[-1].shape[0] * F[-1] // p[-1]
-            print('    weights: M_{} * M_{} = {} * {} = {}'.format(
-                    Ngconv+i, Ngconv+i+1, M_last, M[i], M_last*M[i]))
-            print('    biases: M_{} = {}'.format(Ngconv+i+1, M[i]))
+        if use_fc:
+            for i in range(Nfc):
+                name = 'fc{}'.format(i+1)
+                print('  layer {}: {}'.format(Ngconv+i+1, name))
+                print('    representation: M_{} = {}'.format(Ngconv+i+1, M[i]))
+                M_last = M[i-1] if i > 0 else M_0 if Ngconv == 0 else L[-1].shape[0] * F[-1] // p[-1]
+                print('    weights: M_{} * M_{} = {} * {} = {}'.format(
+                        Ngconv+i, Ngconv+i+1, M_last, M[i], M_last*M[i]))
+                print('    biases: M_{} = {}'.format(Ngconv+i+1, M[i]))
+        else:
+            print('  layer {}: conv1d'.format(Ngconv+1))
+            print('    representation: M_{} = {}'.format(Ngconv+1, M_0[0]))
+            print('    weights: M_{} * F_{} = {} * {} = {}'.format(Ngconv+1, Ngconv+1, M_0[0], 1, M_0[0]))
 
         # Store attributes and bind operations.
         self.L, self.F, self.K, self.p, self.M = L, F, K, p, M
@@ -815,6 +820,7 @@ class cgcnn(base_model):
         self.filter = getattr(self, filter)
         self.brelu = getattr(self, brelu)
         self.pool = getattr(self, pool)
+        self.use_fc = use_fc
 
         #tf.summary.text("parameters", tf.constant(["dir_name="+dir_name,"S="+str(S),"F="+str(F),"K="+str(K),"p="+str(p),"M="+str(M),"learning_rate="+str(learning_rate),"F="+str(F),"F="+str(F),"decay_rate="+str(decay_rate),"decay_steps="+str(decay_steps),"nunm_epochs="+str(num_epochs),"batch_size="+str(batch_size),"regularization="+str(regularization),"dropout="+str(dropout),"filter="+filter,"brelu="+brelu,"pool="+pool]))
 
@@ -966,6 +972,14 @@ class cgcnn(base_model):
         x = tf.matmul(x, W) + b
         return tf.nn.relu(x) if relu else x
 
+    def conv1d(self, x):
+        """1D convolution layer with Mout features."""
+        N, M, Fin = x.get_shape()
+        W = self._weight_variable([1, Fin, 1], regularization=True)
+        x = tf.nn.conv1d(x, W, stride=1, padding='VALID')
+        return tf.reshape(x, [int(N), int(M)])
+
+
     def _inference(self, x, dropout):
         # Graph convolutional layers.
         #x = tf.expand_dims(x, 2)  # N x M x F=1 ## to comment for vector signals
@@ -978,15 +992,19 @@ class cgcnn(base_model):
                 with tf.name_scope('pooling'):
                     x = self.pool(x, self.p[i])
 
-        # Fully connected hidden layers.
-        N, M, F = x.get_shape()
-        x = tf.reshape(x, [int(N), int(M*F)])  # N x M
-        for i,M in enumerate(self.M[:-1]):
-            with tf.variable_scope('fc{}'.format(i+1)):
-                x = self.fc(x, M)
-                x = tf.nn.dropout(x, dropout)
+        if self.use_fc:
+            # Fully connected hidden layers.
+            N, M, F = x.get_shape()
+            x = tf.reshape(x, [int(N), int(M*F)])  # N x M
+            for i,M in enumerate(self.M[:-1]):
+                with tf.variable_scope('fc{}'.format(i+1)):
+                    x = self.fc(x, M)
+                    x = tf.nn.dropout(x, dropout)
 
-        # Logits linear layer, i.e. softmax without normalization.
-        with tf.variable_scope('logits'):
-            x = self.fc(x, self.M[-1], relu=False)
+            # Logits linear layer, i.e. softmax without normalization.
+            with tf.variable_scope('logits'):
+                x = self.fc(x, self.M[-1], relu=False)
+        else:
+            with tf.variable_scope('conv1d'):
+                x = self.conv1d(x)
         return x
