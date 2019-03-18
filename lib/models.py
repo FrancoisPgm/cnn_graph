@@ -134,6 +134,7 @@ class base_model(object):
 
         #print('validation accuracy: peak = {:.2f}, mean = {:.2f}'.format(max(accuracies), np.mean(accuracies[-10:])))
         writer.close()
+        #tf.saved_model.simple_save(sess, path, inputs={"x": tf.constant(train_data[0])}, outputs={"y": tf.constant(val_data[0])})
         sess.close()
 
         t_step = (time.time() - t_wall) / num_steps
@@ -196,6 +197,7 @@ class base_model(object):
         """
         # TODO: optimizations for sparse data
         logits = self._inference(data, dropout)
+        logits = tf.identity(logits, name='outputs')
         return logits
 
     # def probabilities(self, logits):
