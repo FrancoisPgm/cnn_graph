@@ -197,7 +197,7 @@ class base_model(object):
         """
         # TODO: optimizations for sparse data
         logits = self._inference(data, dropout)
-        logits = tf.identity(logits, name='outputs')
+        logits = tf.identity(logits, name='logits')
         return logits
 
     # def probabilities(self, logits):
